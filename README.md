@@ -2,6 +2,19 @@
 
 A secure Docker-based torrenting setup using qBittorrent routed through Surfshark VPN with automatic kill switch.
 
+## Table of Contents
+
+- [Features](#features)
+- [Architecture](#architecture)
+- [Prerequisites](#prerequisites)
+- [Quick Start](#quick-start)
+- [Initial Setup](#initial-setup)
+- [Usage](#usage)
+- [Configuration Management](#configuration-management)
+- [Troubleshooting](#troubleshooting)
+- [Security Best Practices](#security-best-practices)
+- [Maintenance](#maintenance)
+
 ## Features
 
 - **qBittorrent** - Modern web-based torrent client
@@ -25,6 +38,35 @@ If the VPN connection drops, qBittorrent loses all internet access (kill switch)
 - Docker and Docker Compose installed
 - Surfshark VPN subscription
 - Surfshark VPN credentials (see setup below)
+
+## Quick Start
+
+For experienced users who want to get started immediately:
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/imgntn/torrentbox_docker.git
+cd torrentbox_docker
+
+# 2. Copy environment file and configure credentials
+cp .env.example .env
+nano .env  # Add your Surfshark credentials
+
+# 3. Create config directory
+mkdir -p ~/Documents/torrentbox-config/qbittorrent ~/Documents/torrentbox-config/gluetun
+
+# 4. Start containers
+docker compose up -d
+
+# 5. Check logs to verify VPN connection
+docker compose logs -f gluetun
+
+# 6. Access Web UI at http://localhost:9469
+# Default user: admin, password: check logs with:
+docker compose logs qbittorrent | grep "password"
+```
+
+For detailed instructions, continue reading below.
 
 ## Initial Setup
 
@@ -178,6 +220,71 @@ Test that torrents use VPN IP:
    - Check results at: https://ipleak.net/
    - The IP shown should be your VPN IP, not your real IP
 
+## Configuration Management
+
+### Config File Locations
+
+This setup stores configuration files in `~/Documents/torrentbox-config/` (outside the repository) to keep them persistent and separate from the code. The directory structure is:
+
+```
+~/Documents/torrentbox-config/
+├── gluetun/
+│   └── servers.json           # VPN server list (auto-generated)
+└── qbittorrent/
+    └── qBittorrent/
+        ├── qBittorrent.conf   # Main settings (port, limits, etc.)
+        ├── categories.json    # Download categories
+        ├── watched_folders.json # Auto-import folders
+        └── rss/
+            └── feeds.json     # RSS feed subscriptions
+```
+
+### Backed Up Configs
+
+The `config-backup/` directory in this repository contains version-controlled backups of important configuration files. These backups:
+
+- **Are NOT used by the running containers** (they read from `~/Documents/torrentbox-config/`)
+- Serve as reference configurations
+- Can be used to restore settings after a fresh install
+- Should be updated after making significant configuration changes
+
+### Restoring from Backup
+
+If you need to restore your configuration (e.g., on a new machine):
+
+```bash
+# 1. Ensure the config directory exists
+mkdir -p ~/Documents/torrentbox-config/qbittorrent/qBittorrent/rss
+mkdir -p ~/Documents/torrentbox-config/gluetun
+
+# 2. Copy backed up configs
+cp config-backup/qbittorrent/*.conf ~/Documents/torrentbox-config/qbittorrent/qBittorrent/
+cp config-backup/qbittorrent/*.json ~/Documents/torrentbox-config/qbittorrent/qBittorrent/
+cp config-backup/qbittorrent/rss/feeds.json ~/Documents/torrentbox-config/qbittorrent/qBittorrent/rss/
+cp config-backup/gluetun/servers.json ~/Documents/torrentbox-config/gluetun/
+
+# 3. Restart containers to apply
+docker compose restart
+```
+
+### Updating Config Backups
+
+After making important configuration changes in qBittorrent, update the backups:
+
+```bash
+# Copy current configs to backup directory
+cp ~/Documents/torrentbox-config/qbittorrent/qBittorrent/qBittorrent.conf config-backup/qbittorrent/
+cp ~/Documents/torrentbox-config/qbittorrent/qBittorrent/qBittorrent-data.conf config-backup/qbittorrent/
+cp ~/Documents/torrentbox-config/qbittorrent/qBittorrent/categories.json config-backup/qbittorrent/
+cp ~/Documents/torrentbox-config/qbittorrent/qBittorrent/watched_folders.json config-backup/qbittorrent/
+cp ~/Documents/torrentbox-config/qbittorrent/qBittorrent/rss/feeds.json config-backup/qbittorrent/rss/
+
+# Commit to git
+git add config-backup/
+git commit -m "Update config backups"
+git push
+```
+
 ## Troubleshooting
 
 ### VPN Not Connecting
@@ -251,27 +358,135 @@ Test that torrents use VPN IP:
    - Set "Port used for incoming connections" to the forwarded port
    - Uncheck "Use UPnP / NAT-PMP"
 
+### Containers Keep Restarting
+
+If containers are in a restart loop:
+
+```bash
+# Check container status
+docker compose ps
+
+# View recent logs for errors
+docker compose logs --tail=100
+
+# Common causes:
+# 1. Invalid VPN credentials - Check .env file
+# 2. Port already in use - Check with: lsof -i :9469
+# 3. Permission issues - Check volume permissions
+# 4. Docker out of resources - Check with: docker system df
+```
+
+### Slow Download Speeds
+
+1. Try different VPN servers:
+   ```bash
+   # Edit .env to change SERVER_COUNTRIES
+   # Then restart
+   docker compose restart
+   ```
+
+2. Check if VPN server is overloaded:
+   ```bash
+   docker compose logs gluetun | grep -i "latency"
+   ```
+
+3. Adjust qBittorrent connection settings:
+   - **Tools** → **Options** → **Connection**
+   - Increase "Number of connections globally" (default 500)
+   - Increase "Number of connections per torrent" (default 100)
+
+4. Use WireGuard instead of OpenVPN (faster):
+   - Change `VPN_TYPE=wireguard` in `.env`
+   - Get WireGuard credentials from Surfshark
+   - Restart containers
+
+### Permission Denied Errors
+
+If you see permission errors in logs:
+
+```bash
+# Check your user/group IDs
+id
+
+# Update .env with your actual PUID and PGID
+PUID=1000  # Your uid from above command
+PGID=1000  # Your gid from above command
+
+# Fix permissions on existing files
+sudo chown -R $(id -u):$(id -g) ~/Documents/torrentbox-config
+
+# Restart containers
+docker compose restart
+```
+
+### Can't Push to GitHub (SSH Issues)
+
+If you set up this repository and can't push via SSH:
+
+```bash
+# Test SSH connection
+ssh -T git@github.com
+
+# If it fails, add your SSH key
+ssh-add --apple-use-keychain ~/.ssh/id_ed25519
+
+# Copy your public key and add it to GitHub at:
+# https://github.com/settings/keys
+cat ~/.ssh/id_ed25519.pub
+```
+
 ## File Locations
 
-- **Config:** `./qbittorrent/config` - qBittorrent settings, categories, RSS feeds
-- **Downloads:** `./qbittorrent/downloads` - Downloaded files (configurable)
-- **Gluetun Data:** `./gluetun` - VPN configuration and state
+### Repository Structure
+
+```
+torrentbox_docker/
+├── docker-compose.yml         # Container definitions
+├── .env                       # Your credentials (NOT in git)
+├── .env.example              # Template for credentials
+├── README.md                 # This file
+├── config-backup/            # Backed up configs (in git)
+│   ├── qbittorrent/         # qBittorrent config backups
+│   └── gluetun/             # Gluetun config backups
+├── gluetun/                  # Runtime Gluetun data (NOT in git)
+└── qbittorrent/             # Runtime qBittorrent data (NOT in git)
+    └── downloads/           # Downloaded files
+```
+
+### Runtime Data (External)
+
+Configuration files are stored outside the repository in:
+
+```
+~/Documents/torrentbox-config/
+├── gluetun/                  # Gluetun VPN data
+│   └── servers.json         # VPN server list
+└── qbittorrent/             # qBittorrent data
+    └── qBittorrent/
+        ├── qBittorrent.conf # Main config
+        ├── categories.json  # Download categories
+        ├── rss/            # RSS feeds
+        └── BT_backup/      # Torrent state files
+```
+
+This separation keeps your personal configs out of version control while still allowing you to back them up in `config-backup/`.
 
 ## Security Best Practices
 
 1. **Never commit `.env` file** - Contains your VPN credentials
 2. **Change default qBittorrent password** - Do this immediately after first login
-3. **Keep containers updated:**
-   ```bash
-   docker compose pull
-   docker compose up -d
-   ```
-4. **Use strong Web UI password** - In qBittorrent settings
-5. **Don't expose publicly** - Only access from localhost/LAN
+3. **Use strong Web UI password** - In qBittorrent settings
+4. **Don't expose publicly** - Only access from localhost/LAN unless you set up proper authentication
+5. **Keep containers updated** - See [Updating](#updating) below
+6. **Regular backups** - See [Backup](#backup) below
+7. **Verify VPN connection** - Regularly check your IP isn't leaking
+8. **Review qBittorrent logs** - Check for suspicious activity
 
-## Updating
+## Maintenance
 
-To update to the latest versions:
+### Updating
+
+To update containers to the latest versions:
 
 ```bash
 # Pull latest images
@@ -279,23 +494,56 @@ docker compose pull
 
 # Restart with new images
 docker compose up -d
+
+# Clean up old images (optional)
+docker image prune -a
 ```
 
 Your settings and downloads are preserved in the volume directories.
 
-## Backup
+**Update Schedule Recommendation:** Check for updates monthly or when security issues are announced.
 
-To backup your configuration:
+### Backup
+
+#### Quick Backup (Configs Only)
+
+Use the built-in config backup system:
 
 ```bash
-# Backup qBittorrent settings
-tar -czf qbittorrent-backup-$(date +%Y%m%d).tar.gz qbittorrent/config
+# Update the backed up configs in the repository
+cp ~/Documents/torrentbox-config/qbittorrent/qBittorrent/qBittorrent.conf config-backup/qbittorrent/
+cp ~/Documents/torrentbox-config/qbittorrent/qBittorrent/categories.json config-backup/qbittorrent/
+# ... (see "Updating Config Backups" section above)
 
-# Backup everything (including downloads)
-tar -czf torrentbox-backup-$(date +%Y%m%d).tar.gz qbittorrent gluetun .env
+# Commit to git
+git add config-backup/
+git commit -m "Update config backups"
+git push
 ```
 
-## Server Location Recommendations
+#### Full Backup (Everything)
+
+For complete disaster recovery:
+
+```bash
+# Backup runtime configs and data
+tar -czf torrentbox-backup-$(date +%Y%m%d).tar.gz \
+  ~/Documents/torrentbox-config \
+  .env \
+  gluetun/ \
+  qbittorrent/downloads/
+
+# Or exclude large download files
+tar -czf torrentbox-backup-$(date +%Y%m%d).tar.gz \
+  ~/Documents/torrentbox-config \
+  .env
+```
+
+**Backup Schedule Recommendation:**
+- Configs: After significant changes (automatic if you use git)
+- Full backup: Weekly if actively torrenting
+
+### Server Location Recommendations
 
 Good server locations for torrenting:
 
@@ -308,16 +556,73 @@ Avoid for torrenting:
 - **United States** - DMCA notices
 - **United Kingdom** - Strict copyright enforcement
 
-## Performance Tips
+### Performance Tips
 
-1. **Limit active torrents** - Too many can slow downloads
-2. **Adjust upload/download limits** - In qBittorrent settings
-3. **Choose fast servers** - Netherlands, Germany usually fast
-4. **Use WireGuard** - Faster than OpenVPN
-5. **Monitor resource usage:**
+To optimize download speeds and system resources:
+
+1. **Use WireGuard over OpenVPN**
+   - WireGuard is significantly faster
+   - Set `VPN_TYPE=wireguard` in `.env`
+
+2. **Choose optimal VPN servers**
+   - Netherlands, Germany, Switzerland typically offer best speeds
+   - Test different servers if experiencing slowness
+   - Closer servers = lower latency = better performance
+
+3. **Adjust qBittorrent Connection Settings**
+   - **Tools** → **Options** → **Connection**
+   - Global connections: 500-1000 (depending on your bandwidth)
+   - Per-torrent connections: 100-200
+   - Enable uTP for better performance
+
+4. **Limit Active Torrents**
+   - **Tools** → **Options** → **BitTorrent**
+   - Set max active torrents: 5-10
+   - Set max active downloads: 3-5
+   - Prevents resource exhaustion
+
+5. **Set Bandwidth Limits Appropriately**
+   - **Tools** → **Options** → **Speed**
+   - Upload limit: 80% of your upload bandwidth
+   - Download limit: 90% of your download bandwidth
+   - Prevents network congestion
+
+6. **Monitor Resource Usage**
    ```bash
+   # Real-time container stats
    docker stats
+
+   # Check disk space
+   df -h
+
+   # View container resource limits
+   docker compose ps
    ```
+
+7. **Clean Up Completed Torrents**
+   - Regularly remove completed torrents from qBittorrent
+   - Keeps the interface responsive
+
+### Monitoring
+
+Check container health and performance:
+
+```bash
+# Container status
+docker compose ps
+
+# Live logs
+docker compose logs -f
+
+# Resource usage
+docker stats gluetun qbittorrent
+
+# Check VPN IP
+docker compose logs gluetun | grep -i "ip"
+
+# Network throughput
+docker stats --no-stream --format "table {{.Name}}\t{{.NetIO}}"
+```
 
 ## Additional Configuration
 
@@ -348,12 +653,42 @@ In qBittorrent Web UI:
 - Create categories like: Movies, TV, Music, Software
 - Assign torrents to categories for organization
 
-## Support
+## Additional Resources
 
-- **Gluetun Issues:** https://github.com/qdm12/gluetun
-- **qBittorrent Issues:** https://github.com/qbittorrent/qBittorrent
+### Useful Links
+
+- **This Repository:** https://github.com/imgntn/torrentbox_docker
+- **qBittorrent Documentation:** https://github.com/qbittorrent/qBittorrent/wiki
+- **Gluetun Documentation:** https://github.com/qdm12/gluetun/wiki
 - **Surfshark Support:** https://support.surfshark.com
+- **Docker Compose Reference:** https://docs.docker.com/compose/
+
+### Getting Help
+
+1. **Check the logs first:**
+   ```bash
+   docker compose logs
+   ```
+
+2. **Search existing issues:**
+   - Gluetun: https://github.com/qdm12/gluetun/issues
+   - qBittorrent: https://github.com/qbittorrent/qBittorrent/issues
+
+3. **Common issues are covered in [Troubleshooting](#troubleshooting)**
+
+4. **For Surfshark-specific VPN issues:** Contact Surfshark support
+
+### Contributing
+
+Feel free to submit issues or pull requests to improve this setup!
 
 ## License
 
-This configuration is provided as-is. Use responsibly and in accordance with your local laws.
+This configuration is provided as-is for educational purposes. Use responsibly and in accordance with your local laws.
+
+**Important:** Respect copyright laws. This tool is intended for legal torrenting of open-source software, public domain content, and content you have rights to download.
+
+---
+
+**Last Updated:** 2025-10-27
+**Maintained by:** [@imgntn](https://github.com/imgntn)
