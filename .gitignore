@@ -1,9 +1,9 @@
 # Environment files with credentials
 .env
 
-# Docker volumes and data
-gluetun/
-qbittorrent/
+# Docker volumes and data (root level only)
+/gluetun/
+/qbittorrent/
 
 # Log files
 *.log
