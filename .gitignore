@@ -1,0 +1,25 @@
+# Environment files with credentials
+.env
+
+# Docker volumes and data
+gluetun/
+qbittorrent/
+
+# Log files
+*.log
+
+# Backup files
+*.tar.gz
+*.zip
+*.bak
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

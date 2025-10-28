@@ -1,0 +1,75 @@
+version: "3.8"
+
+services:
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    ports:
+      - "9469:8080"   # qBittorrent Web UI
+      - "6881:6881"   # qBittorrent TCP
+      - "6881:6881/udp" # qBittorrent UDP
+    volumes:
+      - ~/Documents/torrentbox-config/gluetun:/gluetun
+    environment:
+      # VPN Provider Settings
+      - VPN_SERVICE_PROVIDER=surfshark
+      - VPN_TYPE=${VPN_TYPE:-wireguard}
+
+      # WireGuard Settings (if using WireGuard)
+      - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
+      - WIREGUARD_ADDRESSES=${WIREGUARD_ADDRESSES}
+
+      # OpenVPN Settings (if using OpenVPN)
+      - OPENVPN_USER=${OPENVPN_USER}
+      - OPENVPN_PASSWORD=${OPENVPN_PASSWORD}
+
+      # Server Selection
+      - SERVER_COUNTRIES=${SERVER_COUNTRIES}
+      - SERVER_HOSTNAMES=${SERVER_HOSTNAMES}
+
+      # Port Forwarding (Surfshark does not support port forwarding)
+      # - VPN_PORT_FORWARDING=on
+      # - VPN_PORT_FORWARDING_PROVIDER=natpmp
+
+      # Firewall Settings (Kill Switch)
+      - FIREWALL_OUTBOUND_SUBNETS=192.168.0.0/16,172.16.0.0/12,10.0.0.0/8
+
+      # Timezone
+      - TZ=${TZ:-America/New_York}
+
+      # Logging
+      - LOG_LEVEL=info
+    restart: unless-stopped
+    networks:
+      - torrent-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "https://www.google.com"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    network_mode: "service:gluetun"  # Route all traffic through Gluetun
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-America/New_York}
+      - WEBUI_PORT=8080
+    volumes:
+      - ~/Documents/torrentbox-config/qbittorrent:/config
+      - ${DOWNLOADS_PATH:-./qbittorrent/downloads}:/downloads
+    restart: unless-stopped
+    depends_on:
+      gluetun:
+        condition: service_healthy
+
+networks:
+  torrent-network:
+    driver: bridge
